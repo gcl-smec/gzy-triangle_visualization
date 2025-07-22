@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>三角形可视化工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            background: #fff;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 10px;
+        }
+        h1 {
+            text-align: center;
+            font-size: 1.5em;
+            margin: 10px 0 20px 0;
+        }
+        .input-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 10px;
+            justify-content: center;
+        }
+        .input-item {
+            display: flex;
+            flex-direction: column;
+            min-width: 90px;
+            flex: 1 1 90px;
+        }
+        label {
+            margin-bottom: 3px;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        input {
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        input:disabled {
+            background-color: #f5f5f5;
+            cursor: not-allowed;
+        }
+        .result-group {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .result-group label {
+            margin-right: 5px;
+        }
+        .validation-message {
+            text-align: center;
+            margin: 8px 0;
+            padding: 8px;
+            border-radius: 4px;
+            display: none;
+        }
+        .error {
+            background-color: #ffebee;
+            color: #b71c1c;
+            display: block;
+        }
+        #canvas-container {
+            width: 90vw;
+            max-width: 900px;
+            height: 50vw;
+            max-height: 500px;
+            min-height: 260px;
+            margin: 0 auto 10px auto;
+            border: 1px solid #eee;
+            background: #fafafa;
+            border-radius: 8px;
+            box-sizing: border-box;
+            position: relative;
+        }
+        #canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        @media (max-width: 600px) {
+            .container {
+                padding: 2vw;
+            }
+            #canvas-container {
+                height: 60vw;
+                min-height: 180px;
+            }
+            .input-item {
+                min-width: 70px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>三角形可视化工具</h1>
+    <div class="input-group">
+        <div class="input-item">
+            <label for="a">边长 a</label>
+            <input type="number" id="a" min="1" value="1200">
+        </div>
+        <div class="input-item">
+            <label for="b">边长 b</label>
+            <input type="number" id="b" min="1" value="2200">
+        </div>
+        <div class="input-item">
+            <label for="c">边长 c (底边)</label>
+            <input type="number" id="c" min="1" value="1500">
+        </div>
+        <div class="input-item">
+            <label for="wg">WG</label>
+            <input type="number" id="wg" min="0" value="900">
+        </div>
+    </div>
+    <div class="input-group">
+        <div class="input-item">
+            <label for="bg">BG</label>
+            <input type="number" id="bg" disabled>
+        </div>
+        <div class="input-item">
+            <label for="wg2" style="visibility:hidden;">WG2</label>
+            <input style="visibility:hidden;">
+        </div>
+    </div>
+    <div class="result-group">
+        <label for="center-offset">中心偏差:</label>
+        <input type="number" id="center-offset" disabled style="width:100px;">
+    </div>
+    <div class="validation-message" id="validation-message"></div>
+    <div id="canvas-container">
+        <canvas id="canvas"></canvas>
+    </div>
+</div>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const aInput = document.getElementById('a');
+const bInput = document.getElementById('b');
+const cInput = document.getElementById('c');
+const wgInput = document.getElementById('wg');
+const bgInput = document.getElementById('bg');
+const centerOffsetInput = document.getElementById('center-offset');
+const validationMessage = document.getElementById('validation-message');
+
+// 校验三角形
+function isValidTriangle(a, b, c) {
+    return a > 0 && b > 0 && c > 0 && a + b > c && a + c > b && b + c > a;
+}
+
+// 余弦定理计算三角形顶点坐标
+function calculateTriangleCoordinates(a, b, c) {
+    // 底边AB，A(0,0), B(c,0)
+    // C点：与A距离为a，与B距离为b
+    // 利用两圆交点公式
+    const x = (c*c + a*a - b*b) / (2*c);
+    let y = 0;
+    if (a*a - x*x >= 0) {
+        y = -Math.sqrt(a*a - x*x); // 取负y，使三角形朝上
+    }
+    return {
+        A: {x: 0, y: 0},
+        B: {x: c, y: 0},
+        C: {x: x, y: y},
+        baseMidpoint: {x: c/2, y: 0}
+    };
+}
+
+// 计算高线和垂足
+function calculateHeightAndFoot(a, b, c, coordinates) {
+    const {A, B, C} = coordinates;
+    // 底边向量
+    const ab = {x: B.x - A.x, y: B.y - A.y};
+    const ac = {x: C.x - A.x, y: C.y - A.y};
+    const abLen2 = ab.x*ab.x + ab.y*ab.y;
+    const proj = (ac.x*ab.x + ac.y*ab.y) / abLen2;
+    const foot = {x: A.x + proj*ab.x, y: A.y + proj*ab.y};
+    const footOutside = proj < 0 || proj > 1;
+    const height = Math.hypot(C.x - foot.x, C.y - foot.y);
+    return {height, foot, footOutside};
+}
+
+// 计算中心偏差
+function calculateCenterOffset(c, wg, coordinates) {
+    // c边中点x - WG中点x
+    return (coordinates.baseMidpoint.x) - (coordinates.C.x + wg/2);
+}
+
+// 缩放与居中
+
+function getTransform(coordinates, wg, marginRatio, canvasW, canvasH) {
+    // 只考虑三角形和WG线段
+    const {A, B, C} = coordinates;
+    const wgEnd = {x: C.x + wg, y: C.y};
+    let minX = Math.min(A.x, B.x, C.x, wgEnd.x);
+    let maxX = Math.max(A.x, B.x, C.x, wgEnd.x);
+    let minY = Math.min(A.y, B.y, C.y, wgEnd.y);
+    let maxY = Math.max(A.y, B.y, C.y, wgEnd.y);
+
+    // 留边距
+    const marginX = canvasW * marginRatio;
+    const marginY = canvasH * marginRatio;
+    const availW = canvasW - 2 * marginX;
+    const availH = canvasH - 2 * marginY;
+    const width = maxX - minX;
+    const height = maxY - minY;
+
+    let scale = Math.min(availW / width, (availH * 0.9) / height); // 垂直缩放减小10%
+    scale = Math.max(scale, 0.05);
+
+    // 使三角形整体居中，底边c与画布底边平行且有margin
+    // 让三角形整体在画布内居中显示
+    const offsetX = marginX + (availW / 2) - ((minX + maxX) / 2) * scale;
+    // 让三角形整体在画布内垂直居中
+    const offsetY = marginY + (availH * 0.4) + ((height / 2) - maxY) * scale; // 进一步上移5%
+
+    return { scale, offsetX, offsetY };
+}
+
+
+// 绘制主函数
+function drawTriangle() {
+    // 画布自适应
+    const container = document.getElementById('canvas-container');
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 获取输入
+    const a = parseFloat(aInput.value) || 0;
+    const b = parseFloat(bInput.value) || 0;
+    const c = parseFloat(cInput.value) || 0;
+    const wg = parseFloat(wgInput.value) || 0;
+    bgInput.value = c;
+
+    // 校验
+    if (!isValidTriangle(a, b, c)) {
+        validationMessage.textContent = '错误：输入的边长无法构成三角形';
+        validationMessage.className = 'validation-message error';
+        centerOffsetInput.value = '';
+        return;
+    } else {
+        validationMessage.textContent = '';
+        validationMessage.className = 'validation-message';
+    }
+
+    // 计算三角形
+    const coordinates = calculateTriangleCoordinates(a, b, c);
+    const {A, B, C, baseMidpoint} = coordinates;
+    const heightInfo = calculateHeightAndFoot(a, b, c, coordinates);
+    const {height, foot, footOutside} = heightInfo;
+
+    // WG线段
+    const wgEnd = {x: C.x + wg, y: C.y};
+    const wgMid = {x: C.x + wg/2, y: C.y};
+
+    // 缩放与居中
+    const {scale, offsetX, offsetY} = getTransform(coordinates, wg, 0.08, canvas.width, canvas.height);
+
+    // 缩放后的点
+    function S(pt) { return {x: pt.x*scale + offsetX, y: pt.y*scale + offsetY}; }
+    const SA = S(A), SB = S(B), SC = S(C), Sfoot = S(foot), SbaseMid = S(baseMidpoint), SwgEnd = S(wgEnd), SwgMid = S(wgMid);
+
+    // 绘制底边延长线（如垂足在外）
+    if (footOutside) {
+        ctx.save();
+        ctx.setLineDash([4,4]);
+        ctx.strokeStyle = "#666";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (foot.x < A.x) {
+            ctx.moveTo(Sfoot.x, Sfoot.y);
+            ctx.lineTo(SA.x, SA.y);
+        } else if (foot.x > B.x) {
+            ctx.moveTo(SB.x, SB.y);
+            ctx.lineTo(Sfoot.x, Sfoot.y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+
+    // 绘制三角形
+    ctx.save();
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(SA.x, SA.y);
+    ctx.lineTo(SB.x, SB.y);
+    ctx.lineTo(SC.x, SC.y);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+
+    // 绘制高线
+    ctx.save();
+    ctx.setLineDash([4,4]);
+    ctx.strokeStyle = "#666";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(SC.x, SC.y);
+    ctx.lineTo(Sfoot.x, Sfoot.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // 垂足红点
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(Sfoot.x, Sfoot.y, 3, 0, Math.PI*2);
+    ctx.fillStyle = "#f00";
+    ctx.strokeStyle = "#333";
+    ctx.lineWidth = 1;
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    // WG线段
+    ctx.save();
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(SC.x, SC.y);
+    ctx.lineTo(SwgEnd.x, SwgEnd.y);
+    ctx.stroke();
+    ctx.restore();
+
+    // WG标注
+    ctx.save();
+    ctx.font = "bold 14px Arial";
+    ctx.fillStyle = "#000";
+    ctx.textAlign = "center";
+    let wgLabelX = (SC.x + SwgEnd.x)/2;
+    let wgLabelY = SC.y + 20;
+    let wgLabel = `WG=${wg}`;
+    let wgTextW = ctx.measureText(wgLabel).width;
+    if (wgLabelX + wgTextW/2 > canvas.width) wgLabelX = canvas.width - wgTextW/2 - 5;
+    if (wgLabelX - wgTextW/2 < 0) wgLabelX = wgTextW/2 + 5;
+    ctx.fillText(wgLabel, wgLabelX, wgLabelY);
+    ctx.restore();
+
+    // 三边标注
+    ctx.save();
+    ctx.font = "bold 14px Arial";
+    ctx.fillStyle = "#000";
+    ctx.textAlign = "center";
+    // a(AC) - 左上
+    let ax = (SA.x + SC.x)/2 - 12, ay = (SA.y + SC.y)/2 - 8;
+    ctx.fillText(`a=${a}`, ax, ay);
+    // b(BC) - 右上
+    let bx = (SB.x + SC.x)/2 + 12, by = (SB.y + SC.y)/2 - 8;
+    ctx.fillText(`b=${b}`, bx, by);
+    // c(AB) - 底边上方
+    let cx = (SA.x + SB.x)/2, cy = (SA.y + SB.y)/2 + 18;
+
+    ctx.restore();
+
+    // 高和底边分段值
+    ctx.save();
+    ctx.font = "bold 14px Arial";
+    ctx.fillStyle = "#000";
+    ctx.textAlign = "center";
+    // 底边分段
+    const segA = Math.hypot(Sfoot.x - SA.x, Sfoot.y - SA.y) / scale;
+    const segB = Math.hypot(SB.x - Sfoot.x, SB.y - Sfoot.y) / scale;
+    ctx.fillText(`${segA.toFixed(0)}`, (SA.x + Sfoot.x)/2, (SA.y + Sfoot.y)/2 - 5);
+    ctx.fillText(`${segB.toFixed(0)}`, (SB.x + Sfoot.x)/2, (SB.y + Sfoot.y)/2 - 5);
+    // 高
+    ctx.fillText(`h=${height.toFixed(0)}`, (SC.x + Sfoot.x)/2 + 15, (SC.y + Sfoot.y)/2);
+    ctx.restore();
+
+    // 标注c边尺寸
+    ctx.save();
+    ctx.font = "bold 14px Arial";
+    ctx.fillStyle = "#000";
+    ctx.textAlign = "center";
+    ctx.fillText(`c=${c.toFixed(2)}`, SbaseMid.x, SbaseMid.y - 15);
+    ctx.restore();
+
+    // 中心偏差可视化
+    // 1. 两条蓝色垂直点划线
+    ctx.save();
+    ctx.setLineDash([2,3]);
+    ctx.strokeStyle = "#00f";
+    ctx.lineWidth = 1;
+    // 计算下端y
+    let bottomY = Math.max(SA.y, SB.y) + 30;
+    // WG中点
+    ctx.beginPath();
+    ctx.moveTo(SwgMid.x, SwgMid.y);
+    ctx.lineTo(SwgMid.x, bottomY);
+    ctx.stroke();
+    // c边中点
+    ctx.beginPath();
+    ctx.moveTo(SbaseMid.x, SbaseMid.y);
+    ctx.lineTo(SbaseMid.x, bottomY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // 2. 红色横线
+    ctx.save();
+    ctx.strokeStyle = "#f00";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(SbaseMid.x, bottomY - 10);
+    ctx.lineTo(SwgMid.x, bottomY - 10);
+    ctx.stroke();
+    ctx.restore();
+
+    // 3. 中心偏差标注
+    const centerOffset = calculateCenterOffset(c, wg, coordinates);
+    centerOffsetInput.value = centerOffset.toFixed(2);
+    ctx.save();
+    ctx.font = "bold 14px Arial";
+    ctx.fillStyle = "#f00"; // 红色字体
+    ctx.textAlign = "center";
+    ctx.fillText(`中心偏差: ${centerOffset.toFixed(2)}`, (SbaseMid.x + SwgMid.x)/2, bottomY + 15); // 移动到红色横线下方
+    ctx.restore();
+}
+
+// BG自动同步c
+function syncBG() {
+    bgInput.value = cInput.value;
+}
+
+// 初始化
+syncBG();
+drawTriangle();
+
+// 监听c变化同步BG
+cInput.addEventListener('input', syncBG);
+
+// 监听窗口resize和输入变化
+window.addEventListener('resize', drawTriangle);
+[aInput, bInput, cInput, wgInput].forEach(input => {
+    input.addEventListener('input', drawTriangle);
+});
+</script>
+</body>
